@@ -1,0 +1,16 @@
+# Chạy: pip install -r requirements.txt
+
+# --- Core ML/CV ---
+torch
+torchvision
+opencv-python
+numpy
+scikit-learn
+Pillow
+
+# --- Language Model ---
+kenlm
+
+# --- Tiện ích & Config ---
+tqdm
+PyYAML

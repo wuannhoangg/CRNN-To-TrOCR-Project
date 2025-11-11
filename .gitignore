@@ -1,0 +1,35 @@
+# 1. Thư mục môi trường ảo
+.venv*
+venv/
+.env
+
+# 2. File tạm của Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# 3. File tạm của hệ điều hành
+.DS_Store
+Thumbs.db
+
+# 4. File tạm của IDE (VSCode, PyCharm)
+.vscode/
+.idea/
+
+# 5. File build và phân phối
+dist/
+build/
+*.egg-info/
+
+# 6. File log và output tạm
+*.log
+*.log.*
+*.logs
+output_detected_boxes.jpg
+temp_*.txt
+temp_*.png
+temp_*.jpg
+
+# 7. Checkpoint do HUẤN LUYỆN tạo ra
+models/checkpoints/
