@@ -16,7 +16,10 @@ class PositionalEncoding(nn.Module):
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         seq_len = x.size(0)
-        if seq_len > self.pe.size(0): raise ValueError(f"Seq len {seq_len} > PE max_len {self.pe.size(0)}")
+        if seq_len > self.pe.size(0):
+             # Tự động mở rộng PE nếu cần (fix lỗi ảnh quá dài)
+            new_pe = PositionalEncoding(self.dropout.p, self.pe.size(2), max_len=seq_len * 2)
+            self.pe = new_pe.pe.to(x.device)
         x = x + self.pe[:seq_len];
         return self.dropout(x)
 
@@ -41,37 +44,23 @@ class VisionTransformerOCR(nn.Module):
         self.embedding = nn.Embedding(num_classes, d_model)
         self.transformer = nn.Transformer(
             d_model, nhead, num_encoder_layers, num_decoder_layers,
-            dim_feedforward, dropout, activation='gelu', batch_first=False,
-            enable_nested_tensor=False
+            dim_feedforward, dropout, activation='gelu', batch_first=False
         )
         self.fc_out = nn.Linear(d_model, num_classes)
 
     def process_src(self, src: torch.Tensor) -> torch.Tensor:
         src_features = self.cnn_backbone(src)
         bs, c, h, w = src_features.shape
-        if h != 3: # Add a check for robustness
-            print(f"[WARN] Unexpected CNN output height. Got {h}, expected 3. Applying adaptive pool.");
+        if h != 3: 
             if not hasattr(self, 'adaptive_pool'): self.adaptive_pool = nn.AdaptiveAvgPool2d((3, w))
             src_features = self.adaptive_pool(src_features); bs, c, h, w = src_features.shape
-        src_features = src_features.view(bs, c * h, w).permute(2, 0, 1)
+        
+        # Thêm .contiguous() để tránh lỗi bộ nhớ
+        src_features = src_features.view(bs, c * h, w).permute(2, 0, 1).contiguous()
+        
         src_features = self.input_proj(src_features)
         src_features = self.pos_encoder(src_features)
         return src_features
-
-    def forward(self, src: torch.Tensor, src_key_padding_mask: torch.Tensor, tgt: torch.Tensor, 
-                tgt_mask: torch.Tensor, tgt_padding_mask: torch.Tensor) -> torch.Tensor:
-        
-        src_processed = self.process_src(src)
-        
-        tgt_emb = self.embedding(tgt) * math.sqrt(self.d_model)
-        tgt_emb = self.pos_encoder(tgt_emb)
-
-        output = self.transformer(src_processed, tgt_emb,
-                                tgt_mask=tgt_mask,
-                                src_key_padding_mask=src_key_padding_mask,
-                                tgt_key_padding_mask=tgt_padding_mask,
-                                memory_key_padding_mask=src_key_padding_mask)
-        return self.fc_out(output)
 
     def encode(self, src: torch.Tensor, src_key_padding_mask: torch.Tensor) -> torch.Tensor:
         src_processed = self.process_src(src)
@@ -80,6 +69,6 @@ class VisionTransformerOCR(nn.Module):
     def decode(self, tgt: torch.Tensor, memory: torch.Tensor, tgt_mask: torch.Tensor, memory_key_padding_mask: torch.Tensor):
         tgt_emb = self.embedding(tgt) * math.sqrt(self.d_model)
         tgt_emb = self.pos_encoder(tgt_emb)
-        return self.transformer.decoder(tgt_emb, memory,
+        return self.transformer.decoder(tgt_emb, memory, 
                                         tgt_mask=tgt_mask,
                                         memory_key_padding_mask=memory_key_padding_mask)
