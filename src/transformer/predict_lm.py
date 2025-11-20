@@ -57,7 +57,13 @@ def main():
     num_classes = len(char_list)
     
     model = VisionTransformerOCR(num_classes=num_classes)
-    model.load_state_dict(ckpt['model_state'])
+
+    try:
+        model.load_state_dict(ckpt['model_state'])
+    except RuntimeError as e:
+        print(f"[WARN] Lỗi strict loading, thử strict=False: {e}")
+        model.load_state_dict(ckpt['model_state'], strict=False)
+        
     model.to(device)
     model.eval()
     print('[INFO] Model OCR recreated and weights loaded.')
@@ -99,9 +105,12 @@ def main():
     else:
         src_key_padding_mask[0, :] = False
 
-    # --- Chạy Beam Search MỚI ---
-    best_sequence = beam_search_decode_with_lm(
-        model, img_tensor, src_key_padding_mask,
+    # --- Chạy Beam Search ---
+    # Hàm trả về List[List[int]] (batch_size x sequence_length)
+    batch_sequences = beam_search_decode_with_lm(
+        model,
+        memory,
+        src_key_padding_mask,
         SOS_IDX, EOS_IDX, PAD_IDX,
         150, args.beam_width,
         idx_to_char,
@@ -109,6 +118,9 @@ def main():
         args.lm_alpha,
         args.lm_beta
     )
+    # --- FIX BUG ---
+    # Lấy phần tử đầu tiên của batch (vì ta chỉ predict 1 ảnh)
+    best_sequence = batch_sequences[0]
     
     pred_indices = best_sequence[1:] # Bỏ [SOS]
     try:
