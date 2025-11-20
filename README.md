@@ -107,6 +107,9 @@ vn-handwriting-ocr/
 
 ### B. Huấn luyện (Training)
 
+## Note:
+Hãy thay đường dẫn trong lệnh và đường dẫn ở file config bằng đường dẫn của bạn
+
 (Các lệnh được chạy từ thư mục gốc `vn-handwriting-ocr/`)
 
 #### 1\. Huấn luyện Transformer (TrOCR)
