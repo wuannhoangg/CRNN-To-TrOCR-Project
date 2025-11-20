@@ -76,19 +76,24 @@ vn-handwriting-ocr/
 
 3.  **Thiết lập môi trường (Windows):**
 
-      * (Tùy chọn) Sửa lỗi hiển thị UTF-8 trên CMD:
-        ```cmd
-        chcp 65001 >NUL
-        set PYTHONIOENCODING=utf-8
-        ```
-      * Kích hoạt môi trường ảo (ví dụ của bạn):
-        ```cmd
-        .\.venv-py311\Scripts\activate
-        ```
-      * Cài đặt thư viện cho Huấn luyện & Đánh giá:
-        ```bash
-        pip install -r requirements.txt
-        ```
+    * (Tùy chọn) Sửa lỗi hiển thị UTF-8 trên CMD:
+    ```cmd
+    chcp 65001 >NUL
+    set PYTHONIOENCODING=utf-8
+    ```
+    * Kích hoạt môi trường ảo (ví dụ của bạn):
+    ```cmd
+    .\.venv-py311\Scripts\activate
+    ```
+    * Cài đặt thư viện cho Huấn luyện & Đánh giá:
+    ```bash
+    pip install -r requirements.txt
+    ```
+    * Cài đặt PyTorch: Truy cập vào trang web https://pytorch.org/get-started/locally/ và cài PyTorch theo ý bạn
+    ```bash
+    pip3 install torch torchvision --index-url https://download.pytorch.org/whl/cu126 #Nếu bạn dùng GPU
+    pip3 install torch torchvision #Nếu bạn dùng CPU
+    ```
 
 4.  **Tải Dữ liệu (Data):**
 
