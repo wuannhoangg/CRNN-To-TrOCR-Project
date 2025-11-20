@@ -42,6 +42,7 @@ class VisionTransformerOCR(nn.Module):
         self.transformer = nn.Transformer(
             d_model, nhead, num_encoder_layers, num_decoder_layers,
             dim_feedforward, dropout, activation='gelu', batch_first=False
+            enable_nested_tensor=False
         )
         self.fc_out = nn.Linear(d_model, num_classes)
 
