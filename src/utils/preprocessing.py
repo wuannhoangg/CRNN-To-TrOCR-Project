@@ -9,6 +9,7 @@ from typing import List, Dict
 
 import numpy as np
 import cv2
+import torch
 from tqdm import tqdm
 try:
     from PIL import Image, ImageEnhance, ImageFilter
