@@ -26,7 +26,7 @@ def gpu_check(force_cpu: bool = False, require_gpu: bool = False) -> str:
         return 'cpu'
     if torch.cuda.is_available():
         print(f'[OK] Found GPU: {torch.cuda.get_device_name(0)}')
-        return 'gpu'
+        return 'cuda'
     else:
         if require_gpu:
             raise SystemError('GPU required (--require_gpu) nhưng không tìm thấy.')
