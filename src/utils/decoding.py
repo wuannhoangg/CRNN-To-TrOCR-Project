@@ -1,6 +1,7 @@
 # utils/decoding.py
 
 import torch
+import torch.nn as nn
 import torch.nn.functional as F
 from typing import List, Dict, Tuple
 
@@ -37,16 +38,13 @@ def beam_search_decode(
     max_len,
     beam_width,
     alpha=0.7
-) -> List[List[int]]:
-    """
-    Giải mã Beam Search (không có LM) cho Transformer.
-    """
+):
     device = memory.device
     bs = memory.size(1)
     final_hypotheses = [[] for _ in range(bs)]
 
     for i in range(bs):
-        mem = memory[:, i:i+1, :]
+        mem = memory[:, i:i+1, :].contiguous()
         mem_pad_mask = src_key_padding_mask[i:i+1, :]
         sequences = [[[sos_idx], 0.0]]
 
@@ -58,7 +56,7 @@ def beam_search_decode(
                     continue
 
                 tgt_tensor = torch.tensor(seq, dtype=torch.long, device=device).unsqueeze(1)
-                tgt_mask = torch.nn.Transformer.generate_square_subsequent_mask(len(seq)).to(device)
+                tgt_mask = nn.Transformer.generate_square_subsequent_mask(len(seq)).to(device)
 
                 with torch.no_grad():
                     out = model.decode(tgt_tensor, mem, tgt_mask, mem_pad_mask)
@@ -99,10 +97,9 @@ def beam_search_decode_with_lm(
     lm_model: 'kenlm.Model',
     lm_alpha: float,
     lm_beta: float
-) -> List[List[int]]:
+):
     """
     Giải mã Beam Search (CÓ LM) cho Transformer.
-    Trích từ: evaluate_with_lm.py
     """
     if kenlm is None:
         raise ImportError("Gói KenLM là bắt buộc. Vui lòng cài đặt.")
@@ -121,15 +118,13 @@ def beam_search_decode_with_lm(
         print("[WARN] Không tìm thấy dấu cách (' ') trong idx_to_char_map.")
 
     for i in range(bs):
-        mem = memory[:, i:i+1, :]
+        mem = memory[:, i:i+1, :].contiguous()
         mem_pad_mask = src_key_padding_mask[i:i+1, :]
         
         initial_lm_state = kenlm.State()
         lm_model.BeginSentenceWrite(initial_lm_state)
         
-        sequences: List[Tuple[List[int], float, kenlm.State, float, List[int]]] = [
-            ([sos_idx], 0.0, initial_lm_state, 0.0, [])
-        ]
+        sequences = [([sos_idx], 0.0, initial_lm_state, 0.0, [])]
 
         for step in range(max_len):
             all_candidates = []
@@ -142,7 +137,7 @@ def beam_search_decode_with_lm(
                     continue
 
                 tgt_tensor = torch.tensor(seq, dtype=torch.long, device=device).unsqueeze(1)
-                tgt_mask = torch.nn.Transformer.generate_square_subsequent_mask(len(seq)).to(device)
+                tgt_mask = nn.Transformer.generate_square_subsequent_mask(len(seq)).to(device)
                 
                 with torch.no_grad():
                     out = model.decode(tgt_tensor, mem, tgt_mask, mem_pad_mask)
