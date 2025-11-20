@@ -114,9 +114,7 @@ vn-handwriting-ocr/
 Chạy training bằng cách gọi module `src.transformer.train`:
 
 ```cmd
-python -m src.transformer.train ^
-    --config "configs/transformer_config.yml" ^
-    --resume_from "models/best_transformer.pt"
+python -m src.transformer.train --config "configs/transformer_config.yml" --resume_from "models/best_transformer.pt"
 ```
 
 **Chú thích tham số:**
@@ -131,11 +129,7 @@ python -m src.transformer.train ^
 Chạy training bằng cách gọi module `src.crnn.train`:
 
 ```cmd
-python -m src.crnn.train ^
-    --images_dir "data/images" ^
-    --labels_json "data/labels.json" ^
-    --output_dir "models/checkpoints_crnn_new" ^
-    --device cuda --amp
+python -m src.crnn.train --images_dir "data/images" --labels_json "data/labels.json" --output_dir "models/checkpoints_crnn_new" --device cuda --amp
 ```
 
 **Chú thích tham số:**
@@ -153,15 +147,7 @@ python -m src.crnn.train ^
 Chạy đánh giá bằng cách gọi module `src.transformer.eval_lm`:
 
 ```cmd
-python -m src.transformer.eval_lm ^
-    --checkpoint "models/best_transformer.pt" ^
-    --test_images_dir "data/test/images" ^
-    --test_labels_json "data/test/labels.json" ^
-    --lm_path "models/3-gram-lm.binary" ^
-    --output_file "evaluation_results.json" ^
-    --beam_width 10 ^
-    --lm_alpha 0.5 ^
-    --lm_beta 0.2
+python -m src.transformer.eval_lm --checkpoint "models/best_transformer.pt" --test_images_dir "data/test/images" --test_labels_json "data/test/labels.json" --lm_path "models/3-gram-lm.binary" --output_file "evaluation_results.json" --beam_width 10 --lm_alpha 0.5 --lm_beta 0.2
 ```
 
 **Chú thích tham số (Rất quan trọng):**
@@ -180,12 +166,7 @@ python -m src.transformer.eval_lm ^
 Chạy đánh giá bằng cách gọi module `src.crnn.eval`:
 
 ```cmd
-python -m src.crnn.eval ^
-    --weights "models/best_crnn.pt" ^
-    --images_dir "data/test/images" ^
-    --labels_json "data/test/labels.json" ^
-    --device cuda --amp ^
-    --out_dir "outputs_eval_crnn"
+python -m src.crnn.eval --weights "models/best_crnn.pt" --images_dir "data/test/images" --labels_json "data/test/labels.json" --device cuda --amp --out_dir "outputs_eval_crnn"
 ```
 
 **Chú thích tham số:**
@@ -200,13 +181,7 @@ python -m src.crnn.eval ^
 Chạy dự đoán 1 ảnh bằng cách gọi module `src.transformer.predict_lm`:
 
 ```cmd
-python -m src.transformer.predict_lm ^
-    --checkpoint "models/best_transformer.pt" ^
-    --image "data/test/images/t1.jpg" ^
-    --lm_path "models/3-gram-lm.binary" ^
-    --beam_width 10 ^
-    --lm_alpha 0.5 ^
-    --lm_beta 0.5
+python -m src.transformer.predict_lm --checkpoint "models/best_transformer.pt" --image "data/test/images/t1.jpg" --lm_path "models/3-gram-lm.binary" --beam_width 10 --lm_alpha 0.5 --lm_beta 0.5
 ```
 
 **Chú thích tham số:**
@@ -219,10 +194,7 @@ python -m src.transformer.predict_lm ^
 Chạy dự đoán 1 ảnh bằng cách gọi module `src.crnn.predict`:
 
 ```cmd
-python -m src.crnn.predict ^
-    --weights "models/best_crnn.pt" ^
-    --image "data/test/images/15520_samples.jpg" ^
-    --device cuda --amp
+python -m src.crnn.predict --weights "models/best_crnn.pt" --image "data/test/images/15520_samples.jpg" --device cuda --amp
 ```
 
 ### E. Chạy Web Demo (Local)
