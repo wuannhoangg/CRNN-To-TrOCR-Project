@@ -1,233 +1,193 @@
-# Đồ án: Cải tiến OCR chữ viết tay tiếng Việt với TrOCR và Hậu xử lý Ngôn ngữ
-[cite_start]Dự án này là đồ án môn học, nhằm mục tiêu cải tiến hệ thống nhận dạng chữ viết tay tiếng Việt bằng cách[cite: 3]:
+# TrOCR_VN_Handwriting — Cải tiến OCR chữ viết tay tiếng Việt với TrOCR + KenLM + DBNet
 
-1.  [cite_start]Sử dụng mô hình Transformer (TrOCR) làm mô hình chính[cite: 3].
-2.  [cite_start]Tích hợp mô hình ngôn ngữ (KenLM) để hậu xử lý, tăng độ chính xác[cite: 3, 9].
-3.  [cite_start]Xây dựng pipeline End-to-End (E2E) với Text Detection (DBNet)[cite: 3, 9].
+## 1) Tổng quan
+Dự án tập trung cải tiến hệ thống OCR chữ viết tay tiếng Việt theo hướng **End-to-End (E2E)**:
 
-Dự án được xây dựng và cải tiến dựa trên mã nguồn CRNN baseline của **TomHuynhSG/Vietnamese-Handwriting-Recognition-OCR**.
+- **Nhận dạng (Recognition):** Vision Transformer OCR (TrOCR-style) là mô hình chính.
+- **Hậu xử lý ngôn ngữ:** **KenLM (n-gram)** được tích hợp trong **Beam Search** để tối ưu chuỗi đầu ra.
+- **Phát hiện văn bản (Detection):** **DBNet (OpenCV DNN, ONNX)** dùng để tách dòng chữ khi input là ảnh “full page”.
+- **Baseline đối chứng:** CRNN + CTC.
 
------
+> Nền tảng mã nguồn ban đầu tham khảo từ CRNN baseline (TomHuynhSG/Vietnamese-Handwriting-Recognition-OCR) và được mở rộng thành pipeline hoàn chỉnh.
 
-## 🚀 Demo Trực Tiếp (Web Application)
+---
 
-[cite_start]Bạn có thể trải nghiệm pipeline hoàn chỉnh (Detection + Recognition + Language Model) tại web demo do nhóm triển khai[cite: 6, 9].
+## 2) Demo (đã deploy)
+Pipeline hoàn chỉnh (Detection + Recognition + LM) được deploy tại Hugging Face Spaces:
 
-**Link Demo:** [https://huggingface.co/spaces/wuann/TrOCR_Demo](https://huggingface.co/spaces/wuann/TrOCR_Demo)
------
+- **Demo:** https://huggingface.co/spaces/wuann/TrOCR_VN_Handwritting
 
-## 📊 Kết quả So sánh
+---
 
-[cite_start]Kết quả đánh giá trên tập test độc lập cho thấy mô hình Transformer (TrOCR) kết hợp với Hậu xử lý Ngôn ngữ (LM) cho kết quả vượt trội so với baseline CRNN[cite: 6, 9].
+## 3) Kết quả (tham khảo)
+Kết quả trên tập test độc lập (1k2 ảnh test):
 
-| Mô hình | CER (Lỗi Ký tự) ⬇️ | WER (Lỗi Từ) ⬇️ |
-| :--- | :---: | :---: |
-| CRNN (Baseline) | *9.56%* | *27.52%* |
-| **TrOCR (Cải tiến)** | *9.01%* | *19.43%* |
+| Mô hình | CER (↓) | WER (↓) |
+|---|---:|---:|
+| CRNN (Baseline) | 21.54% | 52.21% |
+| TrOCR (Cải tiến) | 10.88% | 26.90% |
 
+---
 
------
-
-## 📁 Cấu trúc thư mục
-
+## 4) Cấu trúc thư mục (tóm tắt)
 ```
-vn-handwriting-ocr/
-├── configs/                # Chứa file .yml config cho training
-├── data/                   # Nơi chứa dữ liệu (BỊ GIT BỎ QUA)
-│   ├── alphabet_vi_full.txt
-│   └── README.md           # Hướng dẫn tải data
-├── models/                 # Nơi chứa checkpoint (BỊ GIT BỎ QUA)
-│   └── README.md           # Hướng dẫn tải model
-├── src/                    # TOÀN BỘ CODE HUẤN LUYỆN & ĐÁNH GIÁ
-│   ├── crnn/               # Module cho model CRNN baseline
-│   ├── transformer/        # Module cho model TrOCR cải tiến
-│   └── utils/              # Các hàm dùng chung (metrics, dataset,...)
-│
-├── web_demo/               # CODE DEMO (FastAPI + Docker)
-│   ├── app/                # Code FastAPI (main.py, pipeline.py)
-│   ├── models/             # Models dùng cho demo (được LFS theo dõi)
-│   ├── Dockerfile
-│   └── requirements.txt
-│
-├── .gitignore              # File bỏ qua của Git
-├── README.md               # File này
-└── requirements.txt        # Thư viện cho huấn luyện (src/)
+CRNN-TO-TROCR-PROJECT/
+├── configs/                 # YAML configs (training/eval)
+├── data/                    # Dữ liệu
+│   └── README.md
+├── data_preprocessing/      # Script tiền xử lý, tạo nhãn, tổ chức dataset
+│   └── README.md
+├── models/                  # Checkpoint + LM + DBNet 
+│   └── README.md
+├── src/
+│   ├── crnn/                # CRNN baseline (train/eval/predict)
+│   ├── transformer/         # Transformer OCR + LM (train/eval/predict)
+│   └── utils/               # Dataset, decoding, preprocessing, metrics...
+├── requirements.txt         # Thư viện cho training/eval (không gồm PyTorch)
+└── README.md                
 ```
 
------
+---
 
-## ⚙️ Cài đặt & Hướng dẫn sử dụng
+## 5) Cài đặt môi trường
 
-### A. Chuẩn bị (Bắt buộc)
+### 5.1 Yêu cầu
+- Python **3.10–3.11** (khuyến nghị 3.11 nếu bạn đang dùng `.venv-3.11`).
+- Windows/Linux đều hỗ trợ (lệnh bên dưới minh họa Windows).
+- (Tuỳ chọn) GPU NVIDIA + CUDA để tăng tốc.
 
-1.  **Clone dự án:**
+### 5.2 Tạo môi trường ảo và cài thư viện
+Từ thư mục gốc dự án:
 
-    ```bash
-    git clone https://github.com/ten-ban/vn-handwriting-ocr
-    cd vn-handwriting-ocr
-    ```
+```bash
+python -m venv .venv
+# Windows
+.\.venv\Scripts\activate
+# Linux/macOS
+# source .venv/bin/activate
 
-2.  **Cài đặt Git LFS (để tải model cho `web_demo`):**
+pip install -U pip
+pip install -r requirements.txt
+```
 
-    ```bash
-    git lfs install
-    git lfs pull
-    ```
+### 5.3 Cài PyTorch (CPU/GPU)
+Dự án **không cố định phiên bản torch trong `requirements.txt`** để bạn chủ động chọn đúng build (CPU/CUDA).
 
-3.  **Thiết lập môi trường (Windows):**
+- **GPU:** cài theo hướng dẫn chính thức tại: https://pytorch.org/get-started/locally/
+- **CPU:** có thể cài trực tiếp:
+```bash
+pip install torch torchvision
+```
 
-    * (Tùy chọn) Sửa lỗi hiển thị UTF-8 trên CMD:
-    ```cmd
-    chcp 65001 >NUL
-    set PYTHONIOENCODING=utf-8
-    ```
-    * Kích hoạt môi trường ảo (ví dụ của bạn):
-    ```cmd
-    .\.venv-py311\Scripts\activate
-    ```
-    * Cài đặt thư viện cho Huấn luyện & Đánh giá:
-    ```bash
-    pip install -r requirements.txt
-    ```
-    * Cài đặt PyTorch: Truy cập vào trang web https://pytorch.org/get-started/locally/ và cài PyTorch theo ý bạn
-    ```bash
-    pip3 install torch torchvision --index-url https://download.pytorch.org/whl/cu126 #Nếu bạn dùng GPU
-    pip3 install torch torchvision #Nếu bạn dùng CPU
-    ```
+---
 
-4.  **Tải Dữ liệu (Data):**
+## 6) Chuẩn bị Data và Models
 
-      * **ĐỌC KỸ:** `data/README.md`.
-      * Bạn cần tải và giải nén dữ liệu vào thư mục `data/` trước khi train.
+### 6.1 Data
+- Làm theo `data/README.md` để tải/giải nén và tạo cấu trúc dữ liệu.
+- Tối thiểu cần: thư mục ảnh (`images_dir`) và file nhãn JSON (`labels_json`).
 
-5.  **Tải Model (Checkpoints):**
+### 6.2 Models (checkpoint + LM + DBNet)
+- Tải theo hướng dẫn trong `models/README.md`.
+- Link Google Drive:
+  - https://drive.google.com/drive/folders/1kS9x2vLasqhu5VRu-GuxH5Wh9MxmH9-r?usp=sharing
 
-      * **ĐỌC KỸ:** `models/README.md`.
-      * Bạn cần tải các model đã huấn luyện (ví dụ: `best_transformer.pt`, `best_crnn.pt`, `3-gram-lm.binary`) và đặt vào thư mục `models/`.
 
-### B. Huấn luyện (Training)
 
-## Note:
-Hãy thay đường dẫn trong lệnh và đường dẫn ở file config bằng đường dẫn của bạn
+---
 
-(Các lệnh được chạy từ thư mục gốc `vn-handwriting-ocr/`)
+## 7) Cấu hình YAML (configs/)
+Tinh chỉnh lại config trước khi train cho phù hợp với môi trường local trên máy. Chi tiết xem ở file config ở folder config.
 
-#### 1\. Huấn luyện Transformer (TrOCR)
+---
 
-Chạy training bằng cách gọi module `src.transformer.train`:
+## 8) Huấn luyện (Training)
 
-```cmd
+> Tất cả lệnh dưới đây chạy từ **thư mục gốc** dự án.
+
+### 8.1 Train / Fine-tune Transformer OCR
+```bash
+python -m src.transformer.train --config "configs/transformer_config.yml"
+```
+
+Fine-tune từ checkpoint có sẵn:
+```bash
 python -m src.transformer.train --config "configs/transformer_config.yml" --resume_from "models/best_transformer.pt"
 ```
 
-**Chú thích tham số:**
-
-  * `--config`: (Bắt buộc) Chỉ định file config YAML chứa mọi cài đặt (đường dẫn data, learning rate, batch size...).
-  * `--resume_from`: (Tùy chọn)
-      * [cite_start]**Để huấn luyện tiếp (fine-tune):** Dùng tham số này và trỏ đến file `best_transformer.pt` đã có[cite: 9].
-      * **Để huấn luyện từ đầu (from scratch):** **Xóa** tham số này đi.
-
-#### 2\. Huấn luyện CRNN (Baseline)
-
-Chạy training bằng cách gọi module `src.crnn.train`:
-
-```cmd
-python -m src.crnn.train --images_dir "data/images" --labels_json "data/labels.json" --output_dir "models/checkpoints_crnn_new" --device cuda --amp
+### 8.2 Train CRNN baseline
+```bash
+python -m src.crnn.train ^
+  --images_dir "C:/.../train_images" ^
+  --labels_json "C:/.../labels.json" ^
+  --output_dir "models/checkpoints/crnn" ^
+  --device cuda --amp
 ```
 
-**Chú thích tham số:**
+---
 
-  * `--images_dir`, `--labels_json`: Đường dẫn đến dữ liệu huấn luyện.
-  * `--output_dir`: Thư mục để lưu checkpoint `best.pt` mới.
-  * `--device cuda --amp`: Tăng tốc training nếu bạn có GPU (khuyến khích).
+## 9) Đánh giá (Evaluation)
 
-### C. Đánh giá (Evaluation)
+### 9.1 Đánh giá Transformer + KenLM (Beam Search + LM)
+Lệnh chạy phụ thuộc đúng tên tham số trong `src/transformer/eval_lm.py` (khuyến nghị xem `--help` nếu bạn đã chỉnh sửa script). Ví dụ:
 
-(Giả sử bạn đã đặt file test trong `data/test/images` và `data/test/labels.json`)
-
-#### 1\. Đánh giá Transformer (TrOCR) + Language Model
-
-Chạy đánh giá bằng cách gọi module `src.transformer.eval_lm`:
-
-```cmd
-python -m src.transformer.eval_lm --checkpoint "models/best_transformer.pt" --test_images_dir "data/test/images" --test_labels_json "data/test/labels.json" --lm_path "models/3-gram-lm.binary" --output_file "evaluation_results.json" --beam_width 10 --lm_alpha 0.5 --lm_beta 0.2
+```bash
+python -m src.transformer.eval_lm ^
+  --checkpoint "models/best_transformer.pt" ^
+  --test_images_dir "data/test/images" ^
+  --test_labels_json "data/test/labels.json" ^
+  --lm_path "models/3-gram-lm.binary" ^
+  --beam_width 10 --lm_alpha 0.5 --lm_beta 0.2 ^
+  --output_file "outputs_eval/transformer_preds.json"
 ```
 
-**Chú thích tham số (Rất quan trọng):**
-
-  * `--checkpoint`: Trỏ đến file model TrOCR (`.pt`) bạn muốn đánh giá.
-  * `--lm_path`: Trỏ đến file model ngôn ngữ (`.binary`).
-  * `--output_file`: (Tùy chọn) Lưu kết quả dự đoán chi tiết ra file JSON.
-  * `--beam_width 10`: Tăng số "beam" cho kết quả tốt hơn (nhưng chậm hơn).
-  * `--lm_alpha 0.5`, `--lm_beta 0.2`:
-      * `lm_alpha`: Sức mạnh của model ngôn ngữ (cao hơn = ưu tiên ngữ pháp hơn).
-      * `lm_beta`: Thưởng/phạt cho độ dài (word count).
-      * [cite_start]**Ghi chú:** Qua kiểm thử (Task C3), bộ tham số `alpha=0.5` và `beta=0.2` cho kết quả CER/WER cân bằng và tốt nhất trên tập test[cite: 9].
-
-#### 2\. Đánh giá CRNN (Baseline)
-
-Chạy đánh giá bằng cách gọi module `src.crnn.eval`:
-
-```cmd
-python -m src.crnn.eval --weights "models/best_crnn.pt" --images_dir "data/test/images" --labels_json "data/test/labels.json" --device cuda --amp --out_dir "outputs_eval_crnn"
+### 9.2 Đánh giá CRNN (CTC)
+```bash
+python -m src.crnn.eval ^
+  --weights "models/best_crnn.pt" ^
+  --images_dir "data/test/images" ^
+  --labels_json "data/test/labels.json" ^
+  --device cuda --amp ^
+  --out_dir "outputs_eval/crnn"
 ```
 
-**Chú thích tham số:**
+---
 
-  * `--weights`: Trỏ đến file model CRNN (`.pt`) bạn muốn đánh giá.
-  * `--out_dir`: Nơi lưu file kết quả `preds.csv` và `metrics.txt`.
+## 10) Suy luận (Inference / Predict)
 
-### D. Dự đoán 1 ảnh (Predict)
+### 10.1 Predict 1 ảnh (Transformer + KenLM + DBNet)
+Script `src/transformer/predict_lm.py` tự động chọn chế độ:
+- Nếu ảnh **đã crop sẵn 1 dòng** → bỏ qua detection.
+- Nếu ảnh **full page** → chạy DBNet để cắt dòng rồi nhận dạng từng dòng.
 
-#### 1\. Dự đoán (Transformer + LM)
-
-Chạy dự đoán 1 ảnh bằng cách gọi module `src.transformer.predict_lm`:
-
-```cmd
-python -m src.transformer.predict_lm --checkpoint "models/best_transformer.pt" --image "data/test/images/t1.jpg" --lm_path "models/3-gram-lm.binary" --beam_width 10 --lm_alpha 0.5 --lm_beta 0.5
+Ví dụ chạy:
+```bash
+python -m src.transformer.predict_lm ^
+  --image "data/test/page_01.jpg" ^
+  --ocr_checkpoint "models/best_transformer.pt" ^
+  --lm_model "models/3-gram-lm.binary" ^
+  --det_model "models/DB_TD500_resnet50.onnx" ^
+  --beam_width 10 --lm_alpha 0.5 --lm_beta 0.2 ^
+  --output_file "outputs_eval/page_01.txt"
 ```
 
-**Chú thích tham số:**
-
-  * `--image`: Đường dẫn đến ảnh bạn muốn dự đoán.
-  * `--lm_alpha 0.5`, `--lm_beta 0.5`: Tham số alpha/beta khi dự đoán 1 ảnh có thể cần tinh chỉnh khác với khi đánh giá hàng loạt (ví dụ: `0.5`/`0.5`).
-
-#### 2\. Dự đoán (CRNN)
-
-Chạy dự đoán 1 ảnh bằng cách gọi module `src.crnn.predict`:
-
-```cmd
-python -m src.crnn.predict --weights "models/best_crnn.pt" --image "data/test/images/15520_samples.jpg" --device cuda --amp
+### 10.2 Predict 1 ảnh (CRNN)
+```bash
+python -m src.crnn.predict ^
+  --weights "models/best_crnn.pt" ^
+  --image "data/test/line_01.jpg" ^
+  --device cuda --amp
 ```
 
-### E. Chạy Web Demo (Local)
+---
 
-1.  **Chạy bằng Docker (Khuyến khích):**
+## 11) Data preprocessing
+Toàn bộ script tiền xử lý nằm trong `data_preprocessing/` (check charset, gộp nhãn, đổi tên batch, gộp dataset, sinh dữ liệu tổng hợp...).  
+Xem hướng dẫn chi tiết tại: `data_preprocessing/README.md`.
 
-      * (Đảm bảo bạn đã `git lfs pull` để có model trong `web_demo/models/`)
+---
 
-    ```bash
-    cd web_demo
-    docker build -t ocr-app .
-    docker run -p 8000:8000 ocr-app
-    ```
 
-2.  **Chạy thủ công (Local):**
-
-      * Cài đặt các thư viện riêng của web demo:
-        ```bash
-        pip install -r web_demo/requirements.txt
-        ```
-      * Chạy server FastAPI:
-        ```bash
-        # Chạy từ thư mục gốc vn-handwriting-ocr/
-        python -m uvicorn web_demo.app.main:app --host 0.0.0.0 --port 8000
-        ```
-      * Mở trình duyệt tại: `http://localhost:8000`
-
------
-
-## Attribute
-
-  * **Baseline CRNN:** [TomHuynhSG/Vietnamese-Handwriting-Recognition-OCR](https://github.com/TomHuynhSG/Vietnamese-Handwriting-Recognition-OCR)
-  * **Dữ liệu:** [nghiangh/UIT-HWDB-dataset](https://github.com/nghiangh/UIT-HWDB-dataset) và các nguồn khác.
+## 13) Tham chiếu
+- CRNN baseline: TomHuynhSG/Vietnamese-Handwriting-Recognition-OCR  
+- Một phần dữ liệu tham khảo: nghiangh/UIT-HWDB-dataset và các nguồn tổng hợp khác theo báo cáo.

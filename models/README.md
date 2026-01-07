@@ -1,1 +1,1 @@
-- Đường link các models: https://drive.google.com/file/d/1gdPajPYzt7TnJkwvNobJ5CAfiDNUNP-4/view?usp=sharing
+- Đường link các models: https://drive.google.com/drive/folders/1kS9x2vLasqhu5VRu-GuxH5Wh9MxmH9-r?usp=sharing

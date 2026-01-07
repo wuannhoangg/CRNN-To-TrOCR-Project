@@ -1,14 +1,38 @@
-# Chạy: pip install -r requirements.txt
+# ============================================================
+# Project: Vietnamese Handwriting OCR (CRNN + TrOCR + KenLM)
+# Python: 3.10+ (khuyến nghị 3.11)
+#
+# LƯU Ý VỀ PYTORCH (torch/torchvision):
+# - KHÔNG khai báo trong requirements.txt để tránh sai CUDA wheel.
+# - Hãy cài theo hướng dẫn chính thức tại: https://pytorch.org/get-started/locally/
+#   Ví dụ:
+#     - GPU (CUDA): pip install torch torchvision --index-url https://download.pytorch.org/whl/cuXXX
+#     - CPU:        pip install torch torchvision
+# ============================================================
 
-# --- Core ML/CV ---
-opencv-python
-numpy
-scikit-learn
-Pillow
+# ---------- Core scientific stack ----------
+numpy>=1.23
 
-# --- Language Model ---
-kenlm
+# ---------- Computer Vision / Image I/O ----------
+Pillow>=9.5
+opencv-python>=4.8
 
-# --- Tiện ích & Config ---
-tqdm
-PyYAML
+# Nếu dùng DBNet qua OpenCV và gặp lỗi thiếu:
+#   cv2.dnn_TextDetectionModel_DB
+# hãy GỠ opencv-python và cài bản contrib:
+#   pip uninstall -y opencv-python
+#   pip install opencv-contrib-python>=4.8
+#
+# (Không cài đồng thời opencv-python và opencv-contrib-python)
+
+# ---------- Training / Evaluation utilities ----------
+scikit-learn>=1.2
+tqdm>=4.66
+PyYAML>=6.0
+
+# ---------- Language Model (KenLM) ----------
+# KenLM trên Windows có thể cần build toolchain, cách thường dùng là sẽ cài bằng visual studio; trên Linux thường pip ok.
+kenlm>=0.2.0
+
+# ---------- Geometry (dùng trong predict_lm.py để lọc overlap boxes) ----------
+shapely>=2.0

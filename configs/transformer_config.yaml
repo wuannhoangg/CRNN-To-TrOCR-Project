@@ -1,0 +1,82 @@
+# ===========================
+# CẤU HÌNH HUẤN LUYỆN TRANSFORMER OCR (YAML)
+# ===========================
+# File cấu hình này được dùng bởi script train để:
+# - Định nghĩa đường dẫn dữ liệu (ảnh + nhãn) và bảng chữ cái (alphabet)
+# - Thiết lập tham số huấn luyện (epoch, batch size, learning rate, output_dir)
+# - Thiết lập tham số đánh giá/giải mã (beam search)
+# - Thiết lập seed để tái lập kết quả (reproducibility)
+
+data:
+  # ---------------------------
+  # 1) ĐƯỜNG DẪN DỮ LIỆU (BẮT BUỘC)
+  # ---------------------------
+  # Thư mục chứa ảnh dùng cho train/validation.
+  # Lưu ý: script sẽ quét ảnh hợp lệ theo phần mở rộng (.png/.jpg/.jpeg) và lọc theo labels_json.
+  images_dir: "C:/Users/admin/HCMUT/DATH/TrOCR_DATH/test_data"
+
+  # File JSON chứa nhãn tương ứng với ảnh.
+  # Định dạng khuyến nghị: { "ten_anh.jpg": "chuỗi_nhãn", ... }
+  # Nên dùng basename (tên file) thay vì full path để tránh lệch đường dẫn khi di chuyển dữ liệu.
+  labels_json: "C:/Users/admin/HCMUT/DATH/TrOCR_DATH/labels_test.json"
+
+  # File alphabet (bảng chữ cái) mô tả tập ký tự mục tiêu của mô hình.
+  # Mỗi dòng là một ký tự; <space> đại diện cho dấu cách.
+  # Lưu ý: alphabet quyết định vocabulary => ảnh hưởng trực tiếp tới head phân loại và checkpoint.
+  alphabet: "data/alphabet_vi_full.txt" # <= THAY ĐỔI ĐƯỜNG DẪN NÀY
+
+  # ---------------------------
+  # 2) THAM SỐ TIỀN XỬ LÝ ẢNH
+  # ---------------------------
+  # Chiều cao chuẩn hoá đầu vào (giữ tỷ lệ, resize theo chiều cao).
+  # Nên thống nhất giá trị này giữa train và inference để tránh lệch phân phối.
+  img_height: 118
+
+  # Chế độ tiền xử lý đơn giản hay đầy đủ.
+  # - False: dùng pipeline đầy đủ (ví dụ gaussian_blur_and_adapt_thresh) để tăng tương phản chữ.
+  # - True: có thể bỏ bớt bước xử lý (tuỳ logic code trong train), phù hợp cho dữ liệu đã sạch.
+  simple_preprocess: False
+
+# ===========================
+# 2) CẤU HÌNH HUẤN LUYỆN
+# ===========================
+training:
+  # Thư mục lưu checkpoint và các file phụ trợ (vd charset.json).
+  # Khuyến nghị dùng đường dẫn tương đối để dễ tái sử dụng giữa máy/ môi trường.
+  output_dir: "models/checkpoints/transformer/"
+
+  transformer:
+    # Tỷ lệ chia tập validation từ toàn bộ dữ liệu (vd 0.1 = 10%).
+    # Dùng để theo dõi overfitting và chọn checkpoint tốt nhất theo val loss/metrics.
+    test_size: 0.1
+
+    # Batch size khi huấn luyện.
+    # Batch size lớn giúp ổn định gradient hơn nhưng tốn VRAM.
+    batch_size: 8
+
+    # Tổng số epoch huấn luyện.
+    # Nếu chạy fine-tune tiếp, có thể tăng epochs hoặc dùng resume.
+    epochs: 120
+
+    # Learning rate.
+    # Đây là tham số nhạy: LR quá lớn dễ diverge, quá nhỏ làm hội tụ chậm.
+    lr: 1e-4
+
+# ===========================
+# 3) CẤU HÌNH ĐÁNH GIÁ / GIẢI MÃ (BEAM SEARCH)
+# ===========================
+evaluation:
+  # Beam width (độ rộng chùm) khi giải mã.
+  # Giá trị lớn hơn thường tăng chất lượng nhưng chậm hơn.
+  beam_width: 5
+
+  # Length penalty (alpha) cho beam search.
+  # Alpha cao hơn sẽ giảm xu hướng chọn chuỗi quá ngắn.
+  beam_alpha: 0.7
+
+# ===========================
+# 4) SEED
+# ===========================
+# Seed phục vụ tái lập kết quả (random, numpy, torch).
+# Lưu ý: một số phép tính GPU vẫn có thể không hoàn toàn deterministic tuỳ backend/CUDA.
+seed: 42

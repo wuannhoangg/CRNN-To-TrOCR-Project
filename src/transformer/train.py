@@ -1,15 +1,34 @@
 # src/transformer/train.py
+# -*- coding: utf-8 -*-
+
+"""
+Huấn luyện mô hình Vision Transformer OCR.
+
+Luồng chính:
+1) Nạp cấu hình từ YAML và hợp nhất với cấu hình mặc định.
+2) Chuẩn bị dữ liệu: đọc labels, quét ảnh, chia train/val, tạo DataLoader.
+3) Khởi tạo mô hình và (tuỳ chọn) nạp trọng số từ checkpoint để fine-tune.
+4) Huấn luyện theo teacher forcing với CrossEntropyLoss (ignore PAD).
+5) Validation gồm:
+   - Tính val loss (teacher forcing).
+   - Inference autoregressive bằng beam search để tính CER/WER.
+6) Lưu checkpoint tốt nhất theo val loss.
+
+Usage:
+    python -m src.transformer.train --config configs/base.yaml
+"""
+
 import os
 import argparse
 import json
 import random
 import pathlib
 import math
-from typing import List, Dict, Tuple
-from functools import partial
 import time
 import unicodedata
 import yaml
+from typing import List, Dict, Tuple, Any, Optional
+from functools import partial
 
 import numpy as np
 import cv2
@@ -23,7 +42,6 @@ from sklearn.model_selection import train_test_split
 from torch.optim.lr_scheduler import ReduceLROnPlateau
 from tqdm import tqdm
 
-# --- Import từ thư mục utils ---
 from ..utils.preprocessing import (
     gpu_check,
     ensure_dir,
@@ -32,14 +50,14 @@ from ..utils.preprocessing import (
     resize_keep_height,
     gaussian_blur_and_adapt_thresh,
     calc_max_padded_width,
-    apply_augs_pil
+    apply_augs_pil,
 )
 from ..utils.decoding import beam_search_decode
 
-# --- Import model từ file cùng cấp ---
 from .model import VisionTransformerOCR
+from ..utils.dataset import TransformerDataset as OCRDataset, transformer_collate
 
-# --- Default Config---
+
 DEFAULT_CONFIG = {
     'data': {
         'alphabet': None,
@@ -58,11 +76,22 @@ DEFAULT_CONFIG = {
         'beam_width': 3,
         'beam_alpha': 0.7,
     },
-    'seed': 42
+    'seed': 42,
 }
 
-# --- Config merge function ---
-def merge_configs(base_config, override_config):
+
+def merge_configs(base_config: Dict, override_config: Dict) -> Dict:
+    """Hợp nhất đệ quy hai dictionary cấu hình.
+
+    Các giá trị trong `override_config` sẽ ghi đè lên `base_config`.
+
+    Args:
+        base_config (Dict): Cấu hình gốc (mặc định).
+        override_config (Dict): Cấu hình ghi đè (từ YAML).
+
+    Returns:
+        Dict: Cấu hình đã hợp nhất.
+    """
     for key, value in override_config.items():
         if isinstance(value, dict) and key in base_config and isinstance(base_config[key], dict):
             merge_configs(base_config[key], value)
@@ -70,141 +99,85 @@ def merge_configs(base_config, override_config):
             base_config[key] = value
     return base_config
 
-# --- Dataset & Collate ---
-# (Không import từ utils để đảm bảo logic gốc)
-class OCRDataset(Dataset):
-    def __init__(self, paths: List[str], labels_map: Dict[str, str], height: int, pad_w: int, is_training: bool = False):
-        self.paths = paths
-        self.labels_map = labels_map
-        self.height = height
-        self.pad_w = pad_w
-        self.is_training = is_training
-        self.image_exts = {'.png','.jpg','.jpeg'}
-        self.filtered = [p for p in paths if os.path.basename(p) in labels_map]
-        if self.is_training:
-            print(f"[INFO] Training dataset created with {len(self.filtered)} samples. Online augmentation is ON.")
-        else:
-            print(f"[INFO] Validation dataset created with {len(self.filtered)} samples. Online augmentation is OFF.")
 
-    def __len__(self):
-        return len(self.filtered)
+def cer_wer_ser(pred_texts: List[str], gt_texts: List[str]) -> Tuple[float, float, float]:
+    """Tính CER/WER/SER dựa trên Levenshtein distance.
 
-    def __getitem__(self, idx):
-        path = self.filtered[idx]
-        try:
-            img_bytes = np.fromfile(path, dtype=np.uint8)
-            img = cv2.imdecode(img_bytes, cv2.IMREAD_GRAYSCALE)
-            if img is None: raise IOError("cv2.imdecode returned None")
-        except Exception as e:
-            print(f"[WARN] Could not read image {path}: {e}. Skipping.")
-            return torch.Tensor(), "", 0
-        
-        img_resized = resize_keep_height(img, self.height)
+    Args:
+        pred_texts (List[str]): Danh sách chuỗi dự đoán.
+        gt_texts (List[str]): Danh sách chuỗi ground truth.
 
-        if self.is_training and random.random() < 0.8:
-            try:
-                img_pil = Image.fromarray(img_resized)
-                img_pil = apply_augs_pil(img_pil)
-                img_resized = np.array(img_pil)
-            except Exception as e:
-                print(f"[WARN] Augmentation failed for {path}: {e}")
+    Returns:
+        Tuple[float, float, float]: (CER, WER, SER) theo trung bình.
+    """
 
-        original_width_after_resize = img_resized.shape[1]
-        h, w = img_resized.shape
-        if w < self.pad_w:
-            padded_img = np.pad(img_resized, ((0,0),(0, self.pad_w - w)), mode='median')
-        elif w > self.pad_w:
-            padded_img = cv2.resize(img_resized, (self.pad_w, self.height))
-        else:
-            padded_img = img_resized
-
-        final_img = gaussian_blur_and_adapt_thresh(padded_img)
-        final_img = (final_img.astype(np.float32) / 255.0)[None, ...]
-        text = self.labels_map.get(os.path.basename(path), '')
-        return torch.from_numpy(final_img), text, original_width_after_resize
-
-def transformer_collate(batch, char_to_idx, sos_idx, eos_idx, pad_idx):
-    batch = [item for item in batch if item[0].numel() > 0]
-    if not batch:
-        return None, None, None, None
-
-    imgs, texts, original_widths = zip(*batch); imgs = torch.stack(imgs, dim=0)
-    
-    if len(imgs.shape) != 4:
-        print(f"[WARN] Collate: Unexpected image tensor shape {imgs.shape}. Skipping batch.")
-        return None, None, None, None
-
-    cnn_output_width = imgs.shape[3] // 8
-    src_key_padding_mask = torch.ones(len(texts), cnn_output_width, dtype=torch.bool)
-    for i, w in enumerate(original_widths):
-        valid_len = w // 8
-        if valid_len > 0 and valid_len <= cnn_output_width: src_key_padding_mask[i, :valid_len] = False
-    
-    max_len = max(len(s) for s in texts) + 2 if texts else 2
-    
-    tgt_padded = torch.full((len(texts), max_len), pad_idx, dtype=torch.long)
-    for i, txt in enumerate(texts):
-        encoded = [sos_idx] + [char_to_idx.get(c, pad_idx) for c in txt] + [eos_idx]
-        encoded_len = min(len(encoded), max_len)
-        tgt_padded[i, :encoded_len] = torch.tensor(encoded[:encoded_len], dtype=torch.long)
-        
-    return imgs, src_key_padding_mask, tgt_padded, texts
-
-# --- Metrics ---
-def cer_wer_ser(pred_texts: List[str], gt_texts: List[str]):
     def lev(a, b):
+        """Tính khoảng cách Levenshtein (edit distance)."""
         n, m = len(a), len(b)
-        dp = list(range(m+1))
-        for i in range(1, n+1):
-            prev = dp[0]; dp[0] = i
-            for j in range(1, m+1):
+        dp = list(range(m + 1))
+        for i in range(1, n + 1):
+            prev = dp[0]
+            dp[0] = i
+            for j in range(1, m + 1):
                 tmp = dp[j]
-                dp[j] = min(dp[j]+1, dp[j-1]+1, prev + (0 if a[i-1]==b[j-1] else 1))
+                cost = 0 if a[i - 1] == b[j - 1] else 1
+                dp[j] = min(dp[j] + 1, dp[j - 1] + 1, prev + cost)
                 prev = tmp
         return dp[m]
+
     cer, wer, ser = [], [], []
     for pd, gt in zip(pred_texts, gt_texts):
-        if not gt: continue
+        if not gt:
+            continue
+
         cer.append(lev(list(pd.lower()), list(gt.lower())) / len(gt))
+
         pw, gw = pd.lower().split(), gt.lower().split()
         if len(gw) > 0:
             wer.append(lev(pw, gw) / len(gw))
+
         ser.append(0.0 if pd == gt else 1.0)
-    return float(np.mean(cer if cer else [1.0])), float(np.mean(wer if wer else [1.0])), float(np.mean(ser if ser else [1.0]))
 
-# --------------------- Main Training Loop ---------------------
+    return (
+        float(np.mean(cer if cer else [1.0])),
+        float(np.mean(wer if wer else [1.0])),
+        float(np.mean(ser if ser else [1.0])),
+    )
+
+
 def main():
+    """Điểm vào chính: nạp config, chuẩn bị dữ liệu, huấn luyện và lưu checkpoint."""
     ap = argparse.ArgumentParser(description="Train Vision Transformer OCR Model (v5.5 Stable + YAML/Alphabet)")
-    ap.add_argument('--config', type=str, required=True, help='Path to the YAML configuration file.')
+    ap.add_argument('--config', type=str, required=True, help='Đường dẫn file cấu hình YAML.')
 
-    # Overrides
-    ap.add_argument('--images_dir', type=str, default=None, help='Path to image directory (overrides config).')
-    ap.add_argument('--labels_json', type=str, default=None, help='Path to labels JSON file (overrides config).')
-    ap.add_argument('--output_dir', type=str, default=None, help='Path to output directory (overrides config).')
-    ap.add_argument('--resume_from', type=str, default=None, help='Path to checkpoint to resume training from.')
-    ap.add_argument('--lr', type=float, default=None, help='Override learning rate from config.')
-    ap.add_argument('--epochs', type=int, default=None, help='Override number of epochs from config.')
-    ap.add_argument('--batch_size', type=int, default=None, help='Override batch size from config.')
+    ap.add_argument('--images_dir', type=str, default=None, help='Ghi đè đường dẫn thư mục ảnh.')
+    ap.add_argument('--labels_json', type=str, default=None, help='Ghi đè đường dẫn file labels.')
+    ap.add_argument('--output_dir', type=str, default=None, help='Ghi đè thư mục lưu output.')
+    ap.add_argument('--resume_from', type=str, default=None, help='Đường dẫn checkpoint để train tiếp.')
+    ap.add_argument('--lr', type=float, default=None, help='Ghi đè Learning Rate.')
+    ap.add_argument('--epochs', type=int, default=None, help='Ghi đè số Epochs.')
+    ap.add_argument('--batch_size', type=int, default=None, help='Ghi đè Batch Size.')
     args = ap.parse_args()
 
-    # --- Load Configuration ---
+    # Nạp YAML config và hợp nhất với cấu hình mặc định.
     print(f"[INFO] Loading configuration from: {args.config}")
     if not os.path.exists(args.config):
         raise FileNotFoundError(f"YAML config file not found: {args.config}")
     try:
         with open(args.config, 'r', encoding='utf-8') as f:
-            config = yaml.safe_load(f)
+            yaml_config = yaml.safe_load(f)
     except Exception as e:
         raise IOError(f"Failed to read/parse YAML config file {args.config}: {e}")
 
-    config = merge_configs(DEFAULT_CONFIG.copy(), config)
+    config = merge_configs(DEFAULT_CONFIG.copy(), yaml_config)
 
+    # Tổng hợp tham số thực thi: ưu tiên CLI > YAML.
     cli_args = {}
     cli_args['images_dir'] = args.images_dir or config['data'].get('images_dir')
     cli_args['labels_json'] = args.labels_json or config['data'].get('labels_json')
     cli_args['output_dir'] = args.output_dir or config['training'].get('output_dir', './outputs_transformer_yaml')
     cli_args['resume_from'] = args.resume_from
-    
+
     cfg_data = config.get('data', {})
     cfg_train = config.get('training', {}).get('transformer', {})
     cfg_eval = config.get('evaluation', {})
@@ -216,6 +189,7 @@ def main():
     cli_args['test_size'] = cfg_train.get('test_size', 0.1)
     cli_args['batch_size'] = args.batch_size or cfg_train.get('batch_size', 16)
     cli_args['epochs'] = args.epochs or cfg_train.get('epochs', 50)
+
     try:
         cli_args['lr'] = float(args.lr or cfg_train.get('lr', 3e-4))
     except (ValueError, TypeError):
@@ -223,48 +197,64 @@ def main():
 
     cli_args['beam_width'] = cfg_eval.get('beam_width', 3)
     cli_args['beam_alpha'] = cfg_eval.get('beam_alpha', 0.7)
-    
-    if not cli_args['images_dir']: raise ValueError("Config/CLI error: 'images_dir' is required.")
-    if not cli_args['labels_json']: raise ValueError("Config/CLI error: 'labels_json' is required.")
-    if not cli_args['alphabet_path']: raise ValueError("Config error: 'data.alphabet' path is required.")
-    
-    random.seed(cfg_seed); np.random.seed(cfg_seed); torch.manual_seed(cfg_seed)
-    if torch.cuda.is_available(): torch.cuda.manual_seed_all(cfg_seed)
+
+    if not cli_args['images_dir']:
+        raise ValueError("Config/CLI error: 'images_dir' is required.")
+    if not cli_args['labels_json']:
+        raise ValueError("Config/CLI error: 'labels_json' is required.")
+    if not cli_args['alphabet_path']:
+        raise ValueError("Config error: 'data.alphabet' path is required.")
+
+    # Thiết lập seed cho reproducibility.
+    random.seed(cfg_seed)
+    np.random.seed(cfg_seed)
+    torch.manual_seed(cfg_seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(cfg_seed)
 
     device = torch.device(gpu_check())
     ensure_dir(cli_args['output_dir'])
 
-    # (Logic train)
-    start_epoch = 1
-    best_val_cer = 1.0
+    # Chuẩn bị vocabulary và checkpoint (nếu fine-tune/resume).
+    best_val_loss = float('inf')
 
     base_char_list = read_alphabet(cli_args['alphabet_path'])
     special_tokens = ['[SOS]', '[EOS]', '[PAD]']
     char_list = special_tokens + base_char_list
-    
+
     if cli_args['resume_from'] and os.path.exists(cli_args['resume_from']):
         print(f"[INFO] Loading weights from checkpoint: {cli_args['resume_from']}")
         ckpt = torch.load(cli_args['resume_from'], map_location=device)
         if 'charset' in ckpt and set(char_list) != set(ckpt['charset']):
-             print("[WARN] Checkpoint charset mismatch with alphabet file!")
-        print("[INFO] Starting new fine-tuning run from epoch 1.")
+            print("[WARN] Checkpoint charset mismatch with alphabet file! Re-initializing classification head.")
+        print("[INFO] Starting new fine-tuning run from epoch 1 (Reset Optimizer).")
     else:
         ckpt = None
 
-    char_to_idx = {c:i for i,c in enumerate(char_list)}
-    idx_to_char = {i:c for i,c in char_to_idx.items()}
+    char_to_idx = {c: i for i, c in enumerate(char_list)}
+    idx_to_char = {i: c for i, c in char_to_idx.items()}
     SOS_IDX, EOS_IDX, PAD_IDX = char_to_idx['[SOS]'], char_to_idx['[EOS]'], char_to_idx['[PAD]']
     num_classes = len(char_list)
     print(f'[INFO] Vocabulary size: {num_classes}')
 
+    # Chuẩn bị dữ liệu và dataloader.
     labels_map = read_labels(cli_args['labels_json'], normalize=True)
 
-    image_paths = [str(p) for p in pathlib.Path(cli_args['images_dir']).glob('**/*') if p.suffix.lower() in {'.png','.jpg','.jpeg'}]
+    image_paths = [
+        str(p) for p in pathlib.Path(cli_args['images_dir']).glob('**/*')
+        if p.suffix.lower() in {'.png', '.jpg', '.jpeg'}
+    ]
     image_paths = [p for p in image_paths if os.path.basename(p) in labels_map]
-    if not image_paths: raise ValueError("No valid image paths found matching the labels JSON.")
+    if not image_paths:
+        raise ValueError("No valid image paths found matching the labels JSON.")
 
-    train_paths, val_paths = train_test_split(image_paths, test_size=cli_args['test_size'], random_state=cfg_seed)
-    
+    train_paths, val_paths = train_test_split(
+        image_paths,
+        test_size=cli_args['test_size'],
+        random_state=cfg_seed,
+    )
+
+    # Chọn pad_w: ưu tiên pad_w trong checkpoint để đảm bảo tương thích.
     if ckpt and 'pad_w' in ckpt:
         pad_w = ckpt['pad_w']
         print(f'[INFO] Using padded width from checkpoint: {pad_w}')
@@ -273,15 +263,37 @@ def main():
     print(f'[INFO] Max padded width = {pad_w}')
 
     train_ds = OCRDataset(train_paths, labels_map, cli_args['height'], pad_w, is_training=True)
-    val_ds   = OCRDataset(val_paths,   labels_map, cli_args['height'], pad_w, is_training=False)
+    val_ds = OCRDataset(val_paths, labels_map, cli_args['height'], pad_w, is_training=False)
 
-    collate_fn = partial(transformer_collate, char_to_idx=char_to_idx, sos_idx=SOS_IDX, eos_idx=EOS_IDX, pad_idx=PAD_IDX)
-    
-    train_loader = DataLoader(train_ds, batch_size=cli_args['batch_size'], shuffle=True, num_workers=0, pin_memory=True, collate_fn=collate_fn)
-    val_loader = DataLoader(val_ds, batch_size=cli_args['batch_size'], shuffle=False, num_workers=0, pin_memory=True, collate_fn=collate_fn)
+    collate_fn = partial(
+        transformer_collate,
+        char_to_idx=char_to_idx,
+        sos_idx=SOS_IDX,
+        eos_idx=EOS_IDX,
+        pad_idx=PAD_IDX,
+    )
 
+    train_loader = DataLoader(
+        train_ds,
+        batch_size=cli_args['batch_size'],
+        shuffle=True,
+        num_workers=4,
+        pin_memory=True,
+        collate_fn=collate_fn,
+        persistent_workers=True,
+    )
+    val_loader = DataLoader(
+        val_ds,
+        batch_size=cli_args['batch_size'],
+        shuffle=False,
+        num_workers=4,
+        pin_memory=True,
+        collate_fn=collate_fn,
+        persistent_workers=True,
+    )
+
+    # Khởi tạo model và nạp trọng số (strict=False) nếu fine-tune.
     model = VisionTransformerOCR(num_classes=num_classes).to(device)
-    
     if ckpt:
         print("[INFO] Loading weights with vocabulary change...")
         checkpoint_state_dict = ckpt['model_state']
@@ -290,95 +302,150 @@ def main():
         try:
             model.load_state_dict(filtered_state_dict, strict=False)
             print("[INFO] Model weights loaded successfully (strict=False).")
-            print("[INFO] 'embedding' and 'fc_out' layers are re-initialized for the new vocabulary.")
         except Exception as e:
             print(f"[ERROR] Failed to load weights even after filtering: {e}")
-    
+
+    # Optimizer, scheduler, loss.
     optimizer = torch.optim.AdamW(model.parameters(), lr=cli_args['lr'])
     scheduler = ReduceLROnPlateau(optimizer, mode='min', factor=0.5, patience=3)
     criterion = nn.CrossEntropyLoss(ignore_index=PAD_IDX)
-    scaler = torch.amp.GradScaler(enabled=(device.type=='cuda'))
 
+    # Vòng lặp huấn luyện.
     print(f"[INFO] Starting new run from epoch 1 up to {cli_args['epochs']} epochs.")
     for epoch in range(1, cli_args['epochs'] + 1):
         start_time = time.time()
         model.train()
         running_loss = 0.0
-        
-        train_pbar = tqdm(train_loader, desc=f"Epoch {epoch}/{cli_args['epochs']} [Train]", leave=False)
-        
-        for batch_data in train_pbar:
-            if batch_data[0] is None: continue
-            imgs, src_key_padding_mask, targets, _ = batch_data
-            if imgs is None or imgs.numel() == 0: continue
 
-            imgs, src_key_padding_mask, targets = imgs.to(device), src_key_padding_mask.to(device), targets.to(device)
+        train_pbar = tqdm(train_loader, desc=f"Epoch {epoch}/{cli_args['epochs']} [Train]", leave=False)
+        for batch_data in train_pbar:
+            if batch_data[0] is None:
+                continue
+            imgs, src_key_padding_mask, targets, _ = batch_data
+            if imgs is None or imgs.numel() == 0:
+                continue
+
+            imgs = imgs.to(device)
+            src_key_padding_mask = src_key_padding_mask.to(device)
+            targets = targets.to(device)
+
+            # Teacher forcing: decoder input là chuỗi dịch phải, expected là chuỗi dịch trái.
             tgt_input, tgt_expected = targets[:, :-1], targets[:, 1:]
             tgt_mask = nn.Transformer.generate_square_subsequent_mask(tgt_input.size(1)).to(device)
             tgt_padding_mask = (tgt_input == PAD_IDX)
 
             optimizer.zero_grad()
-            with torch.amp.autocast(device_type=device.type, enabled=(device.type=='cuda')):
-                logits = model(imgs, src_key_padding_mask, tgt_input.T, tgt_mask, tgt_padding_mask)
-                loss = criterion(logits.permute(1, 2, 0), tgt_expected)
-            
-            scaler.scale(loss).backward()
+
+            # AMP: chọn bfloat16 nếu phần cứng hỗ trợ, ngược lại dùng float16.
+            dtype = torch.bfloat16 if torch.cuda.is_bf16_supported() else torch.float16
+            with torch.amp.autocast(device_type=device.type, dtype=dtype):
+                logits = model(imgs, src_key_padding_mask, tgt_input, tgt_mask, tgt_padding_mask)
+                loss = criterion(
+                    logits.reshape(-1, logits.shape[-1]),
+                    tgt_expected.reshape(-1),
+                )
+
+            loss.backward()
             torch.nn.utils.clip_grad_norm_(model.parameters(), 0.5)
-            scaler.step(optimizer)
-            scaler.update()
-            
+            optimizer.step()
+
             current_loss = loss.item()
             running_loss += current_loss
             train_pbar.set_postfix({'loss': f"{current_loss:.4f}"})
 
-        if len(train_loader) == 0: train_loss = 0.0
-        else: train_loss = running_loss / len(train_loader)
+        train_loss = 0.0 if len(train_loader) == 0 else running_loss / len(train_loader)
 
+        # Validation: vừa tính loss, vừa decode autoregressive để tính CER/WER.
         model.eval()
+        val_loss_sum = 0.0
         pred_texts, gt_texts = [], []
-        
+
         val_pbar = tqdm(val_loader, desc=f"Epoch {epoch}/{cli_args['epochs']} [Val]", leave=False)
-        
         with torch.no_grad():
             for batch_data in val_pbar:
-                if batch_data[0] is None: continue
+                if batch_data[0] is None:
+                    continue
                 imgs, src_key_padding_mask, targets, gts = batch_data
-                if imgs is None or imgs.numel() == 0: continue
-                    
-                imgs, src_key_padding_mask = imgs.to(device), src_key_padding_mask.to(device)
+                if imgs is None or imgs.numel() == 0:
+                    continue
+
+                imgs = imgs.to(device)
+                src_key_padding_mask = src_key_padding_mask.to(device)
+                targets = targets.to(device)
+
+                tgt_input, tgt_expected = targets[:, :-1], targets[:, 1:]
+                tgt_mask = nn.Transformer.generate_square_subsequent_mask(tgt_input.size(1)).to(device)
+                tgt_padding_mask = (tgt_input == PAD_IDX)
+
+                dtype = torch.bfloat16 if torch.cuda.is_bf16_supported() else torch.float16
+                with torch.amp.autocast(device_type=device.type, dtype=dtype):
+                    logits = model(imgs, src_key_padding_mask, tgt_input, tgt_mask, tgt_padding_mask)
+                    loss_v = criterion(
+                        logits.reshape(-1, logits.shape[-1]),
+                        tgt_expected.reshape(-1),
+                    )
+                val_loss_sum += loss_v.item()
+
                 memory = model.encode(imgs, src_key_padding_mask)
-                
-                hyps = beam_search_decode(model, memory, src_key_padding_mask, SOS_IDX, EOS_IDX, 150, cli_args['beam_width'], cli_args['beam_alpha'])
-                
+
+                hyps = beam_search_decode(
+                    model,
+                    memory,
+                    src_key_padding_mask,
+                    SOS_IDX,
+                    EOS_IDX,
+                    150,
+                    cli_args['beam_width'],
+                    cli_args['beam_alpha'],
+                    repetition_penalty=1.2,
+                )
+
                 for seq in hyps:
                     pred_indices = seq[1:]
-                    try: eos_pos = pred_indices.index(EOS_IDX); pred_indices = pred_indices[:eos_pos]
-                    except ValueError: pass
+                    try:
+                        eos_pos = pred_indices.index(EOS_IDX)
+                        pred_indices = pred_indices[:eos_pos]
+                    except ValueError:
+                        pass
                     pred_texts.append("".join(idx_to_char.get(idx, "") for idx in pred_indices))
                 gt_texts.extend(gts)
 
+        val_loss = val_loss_sum / len(val_loader)
         val_cer, val_wer, _ = cer_wer_ser(pred_texts, gt_texts)
-        
-        end_time = time.time()
-        epoch_mins, epoch_secs = divmod(end_time - start_time, 60)
-        
-        scheduler.step(train_loss)
+
+        epoch_mins, epoch_secs = divmod(time.time() - start_time, 60)
+
+        scheduler.step(val_loss)
         current_lr = optimizer.param_groups[0]['lr']
 
-        print(f"Epoch {epoch}/{cli_args['epochs']} | Time: {int(epoch_mins)}m {int(epoch_secs)}s | LR: {current_lr:.1e} | "
-                f"Train Loss: {train_loss:.4f} | Val CER: {val_cer:.4f} | Val WER: {val_wer:.4f}")
+        print(
+            f"Epoch {epoch}/{cli_args['epochs']} | Time: {int(epoch_mins)}m {int(epoch_secs)}s | "
+            f"LR: {current_lr:.1e} | TLoss: {train_loss:.4f} | VLoss: {val_loss:.4f} | "
+            f"CER: {val_cer:.4f} | WER: {val_wer:.4f}"
+        )
 
-        if val_cer <= best_val_cer:
-            best_val_cer = val_cer
-            ckpt = { 'epoch': epoch, 'model_state': model.state_dict(), 'optimizer_state': optimizer.state_dict(),
-                        'scheduler_state': scheduler.state_dict(), 'charset': char_list, 'height': cli_args['height'],
-                        'pad_w': pad_w, 'best_val_cer': best_val_cer,
-                        'simple_preprocess': cli_args['simple_preprocess']
-                    }
-            torch.save(ckpt, os.path.join(cli_args['output_dir'], 'best_transformer.pt'))
+        # Lưu checkpoint tốt nhất theo val loss.
+        if val_loss < best_val_loss:
+            best_val_loss = val_loss
+            ckpt = {
+                'epoch': epoch,
+                'model_state': model.state_dict(),
+                'optimizer_state': optimizer.state_dict(),
+                'scheduler_state': scheduler.state_dict(),
+                'charset': char_list,
+                'height': cli_args['height'],
+                'pad_w': pad_w,
+                'best_val_loss': best_val_loss,
+                'simple_preprocess': cli_args['simple_preprocess'],
+            }
+            save_path = os.path.join(cli_args['output_dir'], 'best_transformer.pt')
+            torch.save(ckpt, save_path)
+
             with open(os.path.join(cli_args['output_dir'], 'charset.json'), 'w', encoding='utf-8') as f:
                 json.dump(char_list, f, ensure_ascii=False, indent=2)
-            print("  -> Saved best checkpoint")
+
+            print(f" -> Saved best checkpoint (Loss: {best_val_loss:.4f}) to {save_path}")
+
 
 if __name__ == '__main__':
     main()
