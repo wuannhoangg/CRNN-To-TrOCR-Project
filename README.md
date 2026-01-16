@@ -1,5 +1,9 @@
 # TrOCR_VN_Handwriting — Cải tiến OCR chữ viết tay tiếng Việt với TrOCR + KenLM + DBNet
 
+📄 **[Click here to read the full Technical Report (PDF)](./doc/report.pdf)** for detailed architecture analysis and trade-off benchmarks.
+
+---
+
 ## 1) Tổng quan
 Dự án tập trung cải tiến hệ thống OCR chữ viết tay tiếng Việt theo hướng **End-to-End (E2E)**:
 
