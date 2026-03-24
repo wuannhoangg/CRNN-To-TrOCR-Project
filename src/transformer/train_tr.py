@@ -54,7 +54,7 @@ from ..utils.preprocessing import (
 )
 from ..utils.decoding import beam_search_decode
 
-from .model import VisionTransformerOCR
+from .model_tr import VisionTransformerOCR
 from ..utils.dataset import TransformerDataset as OCRDataset, transformer_collate
 
 

@@ -111,12 +111,12 @@ Tinh chỉnh lại config trước khi train cho phù hợp với môi trường
 
 ### 8.1 Train / Fine-tune Transformer OCR
 ```bash
-python -m src.transformer.train --config "configs/transformer_config.yml"
+python -m src.transformer.train_tr --config "configs/transformer_config.yml"
 ```
 
 Fine-tune từ checkpoint có sẵn:
 ```bash
-python -m src.transformer.train --config "configs/transformer_config.yml" --resume_from "models/best_transformer.pt"
+python -m src.transformer.train_tr --config "configs/transformer_config.yml" --resume_from "models/best_transformer.pt"
 ```
 
 ### 8.2 Train CRNN baseline

@@ -44,7 +44,7 @@ from ..utils.decoding import (
     beam_search_decode_with_lm,
 )
 
-from .model import VisionTransformerOCR
+from .model_tr import VisionTransformerOCR
 
 
 class EvalOCRDataset(Dataset):

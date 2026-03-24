@@ -73,9 +73,9 @@ class PositionalEncoding(nn.Module):
         # Nếu chiều dài chuỗi input lớn hơn max_len đã cache, ta cần tính lại PE
         if seq_len > self.pe.size(0):
             new_pe = PositionalEncoding(
-                self.dropout.p, 
-                self.pe.size(2), 
-                max_len=seq_len + 50 # Cộng thêm dư ra một chút
+                d_model=self.pe.size(2),
+                dropout=self.dropout.p,
+                max_len=seq_len + 50
             )
             self.pe = new_pe.pe.to(x.device)
             

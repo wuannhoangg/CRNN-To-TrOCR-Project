@@ -47,7 +47,7 @@ from ..utils.preprocessing import (
 from ..utils.decoding import (
     beam_search_decode_with_lm,
 )
-from .model import VisionTransformerOCR
+from .model_tr import VisionTransformerOCR
 
 
 def is_pre_cropped(image: np.ndarray, pixel_threshold=1.93, aspect_ratio_threshold=5.0) -> bool:
